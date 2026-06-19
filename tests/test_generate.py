@@ -57,3 +57,29 @@ def test_generate_answer_ignores_unknown_block_ids():
     llm = _FakeLLM('{"answer": "x", "used_block_ids": ["ghost:9-9", "a.py:1-2"], "refused": false}')
     result = generate_answer(llm, "where?", hits)
     assert result["citations"] == [{"path": "a.py", "start_line": 1, "end_line": 2}]
+
+
+def test_generate_answer_fails_closed_when_used_block_ids_is_not_a_list():
+    # Parseable JSON, but used_block_ids is a non-iterable -> must refuse,
+    # not crash with a TypeError.
+    hits = [_hit("a.py:1-2", "a.py", 1, 2, "code A")]
+    llm = _FakeLLM('{"answer": "x", "used_block_ids": 5, "refused": false}')
+    result = generate_answer(llm, "where?", hits)
+    assert result["refused"] is True
+    assert result["citations"] == []
+
+
+def test_generate_answer_fails_closed_when_answer_is_not_a_string():
+    hits = [_hit("a.py:1-2", "a.py", 1, 2, "code A")]
+    llm = _FakeLLM('{"answer": {"nested": 1}, "used_block_ids": [], "refused": false}')
+    result = generate_answer(llm, "where?", hits)
+    assert result["refused"] is True
+    assert result["citations"] == []
+
+
+def test_generate_answer_fails_closed_on_top_level_json_array():
+    hits = [_hit("a.py:1-2", "a.py", 1, 2, "code A")]
+    llm = _FakeLLM('["not", "an", "object"]')
+    result = generate_answer(llm, "where?", hits)
+    assert result["refused"] is True
+    assert result["citations"] == []

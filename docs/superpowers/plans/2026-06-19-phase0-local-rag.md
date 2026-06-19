@@ -1167,10 +1167,18 @@ def generate_answer(llm: LLMProvider, question: str, hits: list[Hit]) -> dict:
 
     try:
         parsed = json.loads(raw)
-        answer = str(parsed["answer"])
+        if not isinstance(parsed, dict):
+            raise TypeError("response must be a JSON object")
+        answer = parsed["answer"]
+        if not isinstance(answer, str):
+            raise TypeError("answer must be a string")
         refused = bool(parsed.get("refused", False))
         used_ids = parsed.get("used_block_ids", []) or []
+        if not isinstance(used_ids, list):
+            raise TypeError("used_block_ids must be a list")
     except (json.JSONDecodeError, KeyError, TypeError):
+        # Any structurally-invalid response fails closed to a refusal so an
+        # ungrounded or malformed answer never reaches the user.
         return _refusal(tokens)
 
     if refused:
