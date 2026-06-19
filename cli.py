@@ -49,13 +49,13 @@ def _cmd_ingest(ns: argparse.Namespace) -> int:
 
 def _cmd_query(ns: argparse.Namespace) -> int:
     from app.providers.embeddings import SentenceTransformerEmbeddings
-    from app.providers.llm import AnthropicLLM
+    from app.providers.llm import make_llm
     from app.providers.vectorstore import InMemoryVectorStore
     from app.query import answer_query
 
     store = InMemoryVectorStore.load(ns.index)
     embedder = SentenceTransformerEmbeddings()
-    llm = AnthropicLLM()
+    llm = make_llm()
     result = answer_query(store, embedder, llm, ns.question, k=ns.k)
 
     print(result["answer"])

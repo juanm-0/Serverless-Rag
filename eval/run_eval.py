@@ -48,14 +48,14 @@ def score_question(
 def _run(index_dir: str, golden_path: str, k: int = DEFAULT_K) -> int:
     from app.generate import generate_answer
     from app.providers.embeddings import SentenceTransformerEmbeddings
-    from app.providers.llm import AnthropicLLM
+    from app.providers.llm import make_llm
     from app.providers.vectorstore import InMemoryVectorStore
     from app.retrieve import retrieve
 
     golden = yaml.safe_load(Path(golden_path).read_text(encoding="utf-8"))
     store = InMemoryVectorStore.load(index_dir)
     embedder = SentenceTransformerEmbeddings()
-    llm = AnthropicLLM()
+    llm = make_llm()
 
     hits = correct = 0
     for item in golden:

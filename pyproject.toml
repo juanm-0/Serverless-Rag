@@ -5,6 +5,8 @@ description = "Phase 0 local RAG proof: chat with a codebase."
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.40",
+    "groq>=0.11",
+    "google-genai>=1.0",
     "sentence-transformers>=3.0",
     "numpy>=1.26",
     "pyyaml>=6.0",

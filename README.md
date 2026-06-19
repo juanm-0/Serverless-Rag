@@ -8,35 +8,53 @@ This is Phase 0: a local CLI + eval harness, no AWS. See
 
 ## Setup
 
-Requires Python 3.11+ and an Anthropic API key.
+Requires Python 3.11+ and one LLM provider key (the LLM is pluggable — pick any).
 
 ```bash
 python -m venv .venv
 # Windows PowerShell: .\.venv\Scripts\Activate.ps1   | Bash: source .venv/Scripts/activate
 python -m pip install -e ".[dev]"
-export ANTHROPIC_API_KEY=sk-ant-...   # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 First run downloads the `all-MiniLM-L6-v2` embedding model and (via
-sentence-transformers) `torch` — a large one-time install.
+sentence-transformers) `torch` — a large one-time install. Embeddings run
+locally; only answer-generation calls an LLM.
+
+### Choose an LLM provider
+
+Select with `LLM_PROVIDER` (default `groq`). Each provider reads its own key and
+has an optional model override:
+
+| `LLM_PROVIDER` | Free? | API key env var | Get a key | Default model (`*_MODEL` override) |
+|---|---|---|---|---|
+| `groq` (default) | yes | `GROQ_API_KEY` | console.groq.com → API Keys | `llama-3.3-70b-versatile` |
+| `gemini` | yes | `GEMINI_API_KEY` | aistudio.google.com → Get API key | `gemini-2.0-flash` |
+| `anthropic` | paid | `ANTHROPIC_API_KEY` | console.anthropic.com | `claude-opus-4-8` |
+
+```bash
+# Example: free Groq (Bash)
+export LLM_PROVIDER=groq
+export GROQ_API_KEY=gsk_...
+```
 
 ## 60-second demo
 
 ```bash
-rag ingest --path .                       # build the index from this repo
-rag query "Where does chunking happen?"   # grounded, cited answer
-python -m eval.run_eval                    # score the golden set
+.venv/Scripts/python.exe -m cli ingest --path .                    # build the index
+.venv/Scripts/python.exe -m cli query "Where does chunking happen?" # grounded, cited answer
+.venv/Scripts/python.exe -m eval.run_eval                           # score the golden set
 ```
 
-Set `ANTHROPIC_MODEL=claude-haiku-4-5` for cheaper iteration; the default is
-`claude-opus-4-8`.
+(After `pip install`, the `rag` console script is also available, e.g.
+`rag ingest --path .`. On Windows, `python` may resolve to a broken Store stub —
+use the venv path `.venv/Scripts/python.exe` as shown.)
 
 ## How it works
 
 - **Ingest:** walk + filter files → line-based chunks (path + line range) →
   local embeddings → `index/vectors.npy` + `index/chunks.json`.
 - **Query:** embed the question → brute-force cosine top-k → grounded prompt →
-  Claude returns `{answer, used_block_ids, refused}` → mapped to citations.
+  the LLM returns `{answer, used_block_ids, refused}` → mapped to citations.
 - **Eval:** golden Q/A in `eval/golden.yaml`, scored for retrieval hit-rate and
   answer correctness.
 
