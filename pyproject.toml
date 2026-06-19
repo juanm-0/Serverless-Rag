@@ -1,0 +1,28 @@
+[project]
+name = "serverless-rag"
+version = "0.0.0"
+description = "Phase 0 local RAG proof: chat with a codebase."
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40",
+    "sentence-transformers>=3.0",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+rag = "cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["cli"]
+packages = ["app", "app.providers"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
