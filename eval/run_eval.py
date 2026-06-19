@@ -1,11 +1,13 @@
-"""Eval harness: run the golden questions through the query path and score.
+"""Eval harness: run the golden questions through the RAG path and score.
 
   python -m eval.run_eval --index index --golden eval/golden.yaml
 
 Scoring (deterministic, cheap):
-  - retrieval hit-rate: did an expected file appear among the citations?
-  - answer correctness: all expected keywords present (case-insensitive) and
-    not a refusal.
+  - retrieval hit-rate: did an expected file appear among the TOP-K RETRIEVED
+    chunks? (measured against retrieval directly, independent of what the LLM
+    chose to cite — this is the retrieval-quality number Phase 0 exists to move)
+  - answer correctness: all expected keywords present (case-insensitive) in a
+    non-refused answer.
 """
 from __future__ import annotations
 
@@ -15,44 +17,68 @@ from pathlib import Path
 
 import yaml
 
-from app.types import QueryResult
+DEFAULT_K = 8
 
 
 def score_question(
-    result: QueryResult, expected_files: list[str], expected_keywords: list[str]
+    retrieved_paths: list[str],
+    answer: str,
+    refused: bool,
+    expected_files: list[str],
+    expected_keywords: list[str],
 ) -> dict:
-    cited_paths = {c["path"] for c in result["citations"]}
-    retrieval_hit = any(f in cited_paths for f in expected_files)
+    """Score one golden question.
 
-    answer_lower = result["answer"].lower()
+    retrieved_paths: file paths of the top-k retrieved chunks (NOT just cited).
+    """
+    retrieval_hit = any(f in retrieved_paths for f in expected_files)
+
+    answer_lower = answer.lower()
     keywords_present = all(kw.lower() in answer_lower for kw in expected_keywords)
-    answer_correct = (not result["refused"]) and keywords_present
+    answer_correct = (not refused) and keywords_present
 
-    return {"retrieval_hit": retrieval_hit, "answer_correct": answer_correct}
+    missing = [kw for kw in expected_keywords if kw.lower() not in answer_lower]
+    return {
+        "retrieval_hit": retrieval_hit,
+        "answer_correct": answer_correct,
+        "missing_keywords": missing,
+    }
 
 
-def _run(index_dir: str, golden_path: str) -> int:
+def _run(index_dir: str, golden_path: str, k: int = DEFAULT_K) -> int:
+    from app.generate import generate_answer
     from app.providers.embeddings import SentenceTransformerEmbeddings
     from app.providers.llm import AnthropicLLM
     from app.providers.vectorstore import InMemoryVectorStore
-    from app.query import answer_query
+    from app.retrieve import retrieve
 
     golden = yaml.safe_load(Path(golden_path).read_text(encoding="utf-8"))
     store = InMemoryVectorStore.load(index_dir)
     embedder = SentenceTransformerEmbeddings()
     llm = AnthropicLLM()
 
-    rows = []
     hits = correct = 0
     for item in golden:
-        result = answer_query(store, embedder, llm, item["question"], k=8)
-        score = score_question(result, item["expected_files"], item["expected_keywords"])
+        retrieved = retrieve(store, embedder, item["question"], k)
+        retrieved_paths = [h["chunk"]["path"] for h in retrieved]
+        generated = generate_answer(llm, item["question"], retrieved)
+        score = score_question(
+            retrieved_paths,
+            generated["answer"],
+            generated["refused"],
+            item["expected_files"],
+            item["expected_keywords"],
+        )
         hits += int(score["retrieval_hit"])
         correct += int(score["answer_correct"])
-        rows.append((item["question"], score))
         flag = "HIT " if score["retrieval_hit"] else "miss"
         ans = "OK  " if score["answer_correct"] else "bad "
         print(f"[retrieval {flag}] [answer {ans}] {item['question']}")
+        if not score["retrieval_hit"]:
+            print(f"    expected {item['expected_files']}, retrieved {sorted(set(retrieved_paths))}")
+        if not score["answer_correct"]:
+            detail = "refused" if generated["refused"] else f"missing keywords {score['missing_keywords']}"
+            print(f"    {detail}")
 
     n = len(golden)
     print()
@@ -75,8 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="run_eval")
     parser.add_argument("--index", default="index")
     parser.add_argument("--golden", default="eval/golden.yaml")
+    parser.add_argument("-k", type=int, default=DEFAULT_K)
     ns = parser.parse_args(argv)
-    return _run(ns.index, ns.golden)
+    return _run(ns.index, ns.golden, ns.k)
 
 
 if __name__ == "__main__":
