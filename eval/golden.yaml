@@ -1,0 +1,26 @@
+# Golden question set for the Serverless-Rag repo itself.
+# Each item: a question, the file(s) we expect retrieval to surface, and
+# keywords the answer should contain (case-insensitive substring match).
+- question: "Where does line-based chunking happen and how is overlap handled?"
+  expected_files: ["app/chunk.py"]
+  expected_keywords: ["overlap", "window"]
+
+- question: "How are vectors searched? What similarity does the vector store use?"
+  expected_files: ["app/providers/vectorstore.py"]
+  expected_keywords: ["cosine"]
+
+- question: "Which embedding model is used by default?"
+  expected_files: ["app/providers/embeddings.py"]
+  expected_keywords: ["MiniLM"]
+
+- question: "How does ingestion decide which files to skip?"
+  expected_files: ["app/ingest.py"]
+  expected_keywords: ["node_modules"]
+
+- question: "What is the grounding contract the LLM must return?"
+  expected_files: ["app/generate.py"]
+  expected_keywords: ["used_block_ids", "refused"]
+
+- question: "Which Claude model does the LLM provider default to?"
+  expected_files: ["app/providers/llm.py"]
+  expected_keywords: ["claude-opus-4-8"]
