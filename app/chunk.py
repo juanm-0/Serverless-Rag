@@ -33,12 +33,8 @@ def chunk_file(
 
     step = window - overlap
     chunks: list[Chunk] = []
-
-    # A file that fits within a single window is one chunk spanning the whole
-    # file. Otherwise slide the window forward by `step`, emitting a (clamped)
-    # window at every start position that begins before the end of the file.
-    starts = [0] if n <= window else list(range(0, n, step))
-    for start in starts:
+    start = 0
+    while start < n:
         end = min(start + window, n)
         start_line = start + 1  # 1-indexed
         end_line = end          # inclusive
@@ -51,4 +47,10 @@ def chunk_file(
                 text="\n".join(lines[start:end]),
             )
         )
+        # Stop once a window reaches the last line. The next window would start
+        # at start+step but end at the same final line, making it a strict
+        # subset of this one — a redundant chunk we don't want in the index.
+        if end == n:
+            break
+        start += step
     return chunks
