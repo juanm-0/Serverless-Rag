@@ -76,6 +76,9 @@ def _cmd_query(ns: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from dotenv import load_dotenv  # auto-load .env so provider keys are picked up
+
+    load_dotenv()
     ns = build_parser().parse_args(argv)
     if ns.command == "ingest":
         return _cmd_ingest(ns)

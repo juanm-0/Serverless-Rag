@@ -98,6 +98,9 @@ def _run(index_dir: str, golden_path: str, k: int = DEFAULT_K) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from dotenv import load_dotenv  # auto-load .env so provider keys are picked up
+
+    load_dotenv()
     parser = argparse.ArgumentParser(prog="run_eval")
     parser.add_argument("--index", default="index")
     parser.add_argument("--golden", default="eval/golden.yaml")

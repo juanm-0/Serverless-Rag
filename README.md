@@ -31,11 +31,16 @@ has an optional model override:
 | `gemini` | yes | `GEMINI_API_KEY` | aistudio.google.com → Get API key | `gemini-2.0-flash` |
 | `anthropic` | paid | `ANTHROPIC_API_KEY` | console.anthropic.com | `claude-opus-4-8` |
 
+Set these however you like — either export them, or (easiest) copy the template
+and fill it in; the CLI and eval harness auto-load `.env`:
+
 ```bash
-# Example: free Groq (Bash)
-export LLM_PROVIDER=groq
-export GROQ_API_KEY=gsk_...
+cp .env.example .env
+# then edit .env and paste your key, e.g. GROQ_API_KEY=gsk_...
 ```
+
+`.env` is gitignored — never commit real keys. The tracked `.env.example` lists
+every variable the tool reads; keep it in sync when new variables are added.
 
 ## 60-second demo
 
