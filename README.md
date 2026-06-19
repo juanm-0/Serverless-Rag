@@ -63,4 +63,22 @@ Embeddings, vector store, and LLM are each pluggable behind one Protocol
 
 ## Current eval score
 
-_Fill in after running `python -m eval.run_eval` (e.g. retrieval 6/6, answers 5/6)._
+Golden set: 6 questions about this repo. Provider: Groq (`llama-3.3-70b-versatile`).
+
+- **Retrieval hit-rate: 5/6 (83%)**
+- **Answer correctness: 5/6 (83%)**
+
+The two misses are honest eval signal, not bugs, and point at the next tuning levers:
+
+1. *"How does ingestion decide which files to skip?"* — the right file **was** retrieved
+   and the answer was correct, but it didn't contain the exact substring `node_modules`.
+   This is the known limitation of deterministic keyword scoring (chosen over an
+   LLM-as-judge for Phase 0; the latter is the obvious next step).
+2. *"What is the grounding contract the LLM must return?"* — retrieval **miss**: the
+   `docs/` (this repo's own design spec and implementation plan reproduce the code as
+   prose) out-rank `app/generate.py` for a conceptual query. This is the classic
+   pure-vector-search weakness on code-vs-docs, and motivates Phase 3's hybrid
+   (vector + keyword) retrieval.
+
+This is the number that moves as you tune chunk size, `k`, the prompt, the corpus,
+and the scoring method.
