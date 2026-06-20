@@ -13,3 +13,8 @@ variable "account_id" {
 variable "github_repo" {
   default = "juanm-0/Serverless-Rag"
 }
+
+variable "ingest_image_tag" {
+  description = "Tag of the ingest container image in ECR"
+  default     = "latest"
+}
