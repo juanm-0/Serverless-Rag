@@ -1,129 +1,172 @@
-# Serverless-Rag — Phase 0 (local RAG proof)
+# Serverless-Rag — chat with a codebase
 
-Point it at a code repository, then ask natural-language questions and get
-answers grounded in the actual code, cited to exact files and line ranges.
+Point it at a code repository, then ask natural-language questions and get answers
+that are **grounded in the actual code and cite the exact files + line ranges** they
+came from — and that say *"I don't find that in the code"* when the context doesn't
+support an answer. Runs locally as a CLI, or serverless on AWS (free-tier), all
+provisioned as code.
 
-This is Phase 0: a local CLI + eval harness, no AWS. See
-[`docs/PROJECT.md`](docs/PROJECT.md) for the full plan and later phases.
+---
 
-## Setup
+## ⚠️ Bring your own keys — this is self-hosted, not a shared service
 
-Requires Python 3.11+ and one LLM provider key (the LLM is pluggable — pick any).
+There is **no hosted/shared instance** of this tool. To use it, **you run it yourself
+with your own API keys** (and, for the cloud version, your own AWS account). This is
+deliberate so that no one else's free quotas get burned by strangers.
+
+- **Keys are never in this repo.** Locally they live in a **gitignored `.env`**; in the
+  cloud they live in **AWS SSM SecureString** parameters you set yourself. The tracked
+  `.env.example` lists the variable *names* only — never values.
+- **The deployed API endpoint is private.** Every request needs an `x-api-key` that only
+  **you** (the deployer) hold, plus a rate limit + daily quota. Cloning this public repo
+  gives you the *code* — not access to anyone's running endpoint, keys, or AWS account.
+- The free providers (Groq, Gemini) each have their own free tiers. If you deploy, you're
+  spending **your** free quota, protected by **your** API key. Don't share the key value.
+
+---
+
+## What it does
+
+```
+ingest:  repo → filter files → line-based chunks (+path/line metadata) → embed → store
+query:   question → embed → top-k cosine → grounded, cite-instructed prompt → LLM → cited answer
+```
+
+Embeddings, the vector store, and the LLM are each **pluggable behind one interface**
+(`app/types.py`) — swapping a vendor (or local↔cloud) touches no query/ingest logic.
+
+---
+
+## Run it locally (no AWS needed)
+
+**Requirements:** Python 3.11+ and at least one free LLM key.
 
 ```bash
 python -m venv .venv
-# Windows PowerShell: .\.venv\Scripts\Activate.ps1   | Bash: source .venv/Scripts/activate
+# Windows PowerShell: .\.venv\Scripts\Activate.ps1   |  Bash: source .venv/Scripts/activate
 python -m pip install -e ".[dev]"
 ```
+> First run downloads `all-MiniLM-L6-v2` + `torch` (a large one-time install). Locally,
+> embeddings run on your machine; only answer-generation calls an LLM API.
+>
+> On Windows, bare `python` may hit a broken Store stub — use `.venv/Scripts/python.exe`.
 
-First run downloads the `all-MiniLM-L6-v2` embedding model and (via
-sentence-transformers) `torch` — a large one-time install. Embeddings run
-locally; only answer-generation calls an LLM.
-
-### Choose an LLM provider
-
-Select with `LLM_PROVIDER` (default `groq`). Each provider reads its own key and
-has an optional model override:
-
-| `LLM_PROVIDER` | Free? | API key env var | Get a key | Default model (`*_MODEL` override) |
-|---|---|---|---|---|
-| `groq` (default) | yes | `GROQ_API_KEY` | console.groq.com → API Keys | `llama-3.3-70b-versatile` |
-| `gemini` | yes | `GEMINI_API_KEY` | aistudio.google.com → Get API key | `gemini-2.0-flash` |
-| `anthropic` | paid | `ANTHROPIC_API_KEY` | console.anthropic.com | `claude-opus-4-8` |
-
-Set these however you like — either export them, or (easiest) copy the template
-and fill it in; the CLI and eval harness auto-load `.env`:
-
+**Provide your key(s)** — copy the template and fill in your own:
 ```bash
 cp .env.example .env
-# then edit .env and paste your key, e.g. GROQ_API_KEY=gsk_...
+# edit .env, e.g.  GROQ_API_KEY=gsk_your_own_key
 ```
 
-`.env` is gitignored — never commit real keys. The tracked `.env.example` lists
-every variable the tool reads; keep it in sync when new variables are added.
+| `LLM_PROVIDER` | Free? | Key env var | Where to get a free key |
+|---|---|---|---|
+| `groq` (default) | yes | `GROQ_API_KEY` | console.groq.com → API Keys |
+| `gemini` | yes | `GEMINI_API_KEY` | aistudio.google.com → Get API key |
+| `anthropic` | paid | `ANTHROPIC_API_KEY` | console.anthropic.com |
 
-## 60-second demo
-
+**Use it:**
 ```bash
-.venv/Scripts/python.exe -m cli ingest --path .                    # build the index
-.venv/Scripts/python.exe -m cli query "Where does chunking happen?" # grounded, cited answer
-.venv/Scripts/python.exe -m eval.run_eval                           # score the golden set
+.venv/Scripts/python.exe -m cli ingest --path .                     # index a local dir
+.venv/Scripts/python.exe -m cli ingest --repo-url https://github.com/OWNER/REPO  # or a public repo
+.venv/Scripts/python.exe -m cli query "Where does chunking happen?"  # grounded, cited answer
+.venv/Scripts/python.exe -m eval.run_eval                            # score the golden set
+```
+`.env` is gitignored — never commit real keys.
+
+---
+
+## Deploy your own serverless instance on AWS (optional)
+
+Provisions the whole stack with Terraform on the AWS always-free tier: S3 (vectors) +
+DynamoDB (chunks) + two Lambdas + API Gateway (API-key protected) + SSM secrets +
+CloudWatch. See [`docs/aws-concepts-review.md`](docs/aws-concepts-review.md) for a full
+explainer and [the Phase 1 spec](docs/superpowers/specs/2026-06-19-phase1-serverless-mvp-design.md).
+
+**Prereqs:** your own AWS account (Free plan recommended), AWS CLI configured, Terraform.
+First adjust `infra/variables.tf` (`account_id`, `github_repo`) and the state-bucket name
+in `infra/versions.tf` to **your** values, and bootstrap a state bucket once.
+
+**1. Put YOUR keys into SSM (out-of-band — they never enter Terraform or git):**
+```bash
+aws ssm put-parameter --name /serverless-rag/groq-api-key   --type SecureString --value "$GROQ_API_KEY"   --region <your-region>
+aws ssm put-parameter --name /serverless-rag/gemini-api-key --type SecureString --value "$GEMINI_API_KEY" --region <your-region>
 ```
 
-(After `pip install`, the `rag` console script is also available, e.g.
-`rag ingest --path .`. On Windows, `python` may resolve to a broken Store stub —
-use the venv path `.venv/Scripts/python.exe` as shown.)
-
-## How it works
-
-- **Ingest:** walk + filter files → line-based chunks (path + line range) →
-  local embeddings → `index/vectors.npy` + `index/chunks.json`.
-- **Query:** embed the question → brute-force cosine top-k → grounded prompt →
-  the LLM returns `{answer, used_blocks, refused}` (numbered-block citations) →
-  mapped to citations.
-- **Eval:** golden Q/A in `eval/golden.yaml`, scored for retrieval hit-rate and
-  answer correctness.
-
-Embeddings, vector store, and LLM are each pluggable behind one Protocol
-(`app/types.py`) — swapping a vendor touches no query/ingest logic.
-
-## Phase 1 — live on AWS (serverless)
-
-The same RAG core runs serverless on AWS, provisioned with Terraform. See the
-[Phase 1 spec](docs/superpowers/specs/2026-06-19-phase1-serverless-mvp-design.md)
-and the [AWS concepts review](docs/aws-concepts-review.md).
-
-- **Embeddings:** hosted Gemini (`gemini-embedding-001`) — no torch in Lambda.
-- **Storage:** vectors in **S3**, chunk text/metadata in **DynamoDB** (top-k via
-  `BatchGetItem`), eval results in DynamoDB.
-- **Compute/API:** two zip **Lambdas** (query sync, ingest async-202) behind a
-  REST **API Gateway** with an API-key usage plan; secrets in **SSM SecureString**.
-- **Delivery:** Terraform (S3 remote state, native locking) + **GitHub Actions via
-  OIDC** (no stored AWS keys); CloudWatch logs at 30-day retention.
-
+**2. Build the Lambda package + deploy:**
 ```bash
-# deploy
-aws ssm put-parameter --name /serverless-rag/groq-api-key   --type SecureString --value "$GROQ_API_KEY"   --region ca-central-1
-aws ssm put-parameter --name /serverless-rag/gemini-api-key --type SecureString --value "$GEMINI_API_KEY" --region ca-central-1
 PYTHON=.venv/Scripts/python.exe bash scripts/build_lambda.sh
 cd infra && terraform init && terraform apply
-
-# query the deployed endpoint (key from the usage plan)
-curl -s -X POST "$(terraform -chdir=infra output -raw invoke_url)/query" \
-  -H "x-api-key: <API_KEY>" -H "content-type: application/json" \
-  -d '{"question":"How are vectors searched?"}'
-
-# tear it all down (no lingering cost)
-terraform -chdir=infra destroy
 ```
 
-Live response (served from AWS): a grounded answer like *"Cosine similarity"* citing
-`providers/vectorstore.py` — `{answer, citations[], refused, latency_ms, tokens}`.
+**3. Note your private endpoint + API key (keep the key value secret):**
+```bash
+terraform -chdir=infra output -raw invoke_url      # your API URL
+terraform -chdir=infra output -raw api_key_id      # then fetch the value:
+aws apigateway get-api-key --api-key <api_key_id> --include-value --region <your-region> --query value --output text
+```
 
-> **Free-tier note:** Gemini's embedding free tier is tokens-per-minute limited, so
-> the deployed demo index covers `app/` only; a full-repo cloud index needs request
-> throttling or a paid tier. `git` isn't in the Lambda runtime, so cloud-side
-> repo-URL ingest runs from a workstation against the cloud store (or a container
-> image — a Phase 3 item).
+**Tear it all down (no lingering cost):** `terraform -chdir=infra destroy`.
 
-## Current eval score
+CI/CD: pushing to `main` runs the tests and deploys via **GitHub OIDC** (no AWS keys stored
+in GitHub). Set the workflow's `role-to-assume` to *your* CI role ARN.
+
+---
+
+## Using your deployed endpoint
+
+**Important — where each step runs.** The cloud **query** path runs entirely in the
+Lambda (your endpoint). **Ingesting an external repo runs on your workstation**, because
+the Lambda runtime has no `git` to clone a URL — so you run the *same* ingest code locally
+and it writes to the *same* cloud store (S3 + DynamoDB). Chunking happens wherever ingest
+runs (locally, for an external repo). A container-image ingest Lambda (with `git`) is a
+future enhancement.
+
+**Index a repo into your cloud store (run locally):**
+```bash
+git clone --depth 1 https://github.com/OWNER/REPO /tmp/target   # clone is transient
+AWS_DEFAULT_REGION=<your-region> GEMINI_EMBED_BATCH=25 \
+.venv/Scripts/python.exe -c "
+from app.config import load_secrets_from_ssm; load_secrets_from_ssm()
+from app.providers.embeddings import GeminiEmbeddings
+from app.providers.vectorstore import S3DynamoVectorStore
+from app.ingest import build_index
+s = S3DynamoVectorStore('<your-index-bucket>', '<your-chunks-table>')
+print('indexed', build_index('/tmp/target', GeminiEmbeddings(), s)); s.persist()"
+```
+> Keep the corpus modest: Gemini's free embedding tier is **tokens-per-minute** limited.
+> The embedder batches at ≤100 and **retries on 429 with back-off**, so a large repo still
+> completes — it just takes longer (a few hundred chunks ≈ several minutes).
+
+**Ask your endpoint a question (with YOUR api key):**
+```bash
+KEY=$(aws apigateway get-api-key --api-key <your-api-key-id> --include-value --region <your-region> --query value --output text)
+curl -s -X POST "<your-invoke-url>/query" \
+  -H "x-api-key: $KEY" -H "content-type: application/json" \
+  -d '{"question":"How does it handle video streaming?", "k":4}'
+```
+Response shape: `{answer, citations:[{path,start_line,end_line}], refused, latency_ms, tokens}`.
+
+**Tips:** `403` = missing/wrong key · `409` = no index yet · default `k` is 8, but on
+**large-file repos lower `k`** (e.g. `"k":4`) — a big retrieved context can make generation
+exceed API Gateway's hard **29-second** timeout (`504`).
+
+---
+
+## Current eval score (local, this repo)
 
 Golden set: 6 questions about this repo. Provider: Groq (`llama-3.3-70b-versatile`).
 
-- **Retrieval hit-rate: 5/6 (83%)**
-- **Answer correctness: 5/6 (83%)**
+- **Retrieval hit-rate: 5/6 (83%)** · **Answer correctness: 5/6 (83%)**
 
-The two misses are honest eval signal, not bugs, and point at the next tuning levers:
+The two misses are honest eval signal (deterministic keyword scoring is brittle; and
+prose docs out-rank code for one conceptual query — the classic pure-vector weakness that
+motivates hybrid retrieval). This is the number that moves as you tune chunk size, `k`,
+the prompt, the corpus, and the scoring method.
 
-1. *"How does ingestion decide which files to skip?"* — the right file **was** retrieved
-   and the answer was correct, but it didn't contain the exact substring `node_modules`.
-   This is the known limitation of deterministic keyword scoring (chosen over an
-   LLM-as-judge for Phase 0; the latter is the obvious next step).
-2. *"What is the grounding contract the LLM must return?"* — retrieval **miss**: the
-   `docs/` (this repo's own design spec and implementation plan reproduce the code as
-   prose) out-rank `app/generate.py` for a conceptual query. This is the classic
-   pure-vector-search weakness on code-vs-docs, and motivates Phase 3's hybrid
-   (vector + keyword) retrieval.
+---
 
-This is the number that moves as you tune chunk size, `k`, the prompt, the corpus,
-and the scoring method.
+## Build phases & docs
+
+Phase 0 (local proof) and Phase 1 (serverless AWS) are complete; Phase 2 (tool-calling
+agent) and Phase 3 (OpenSearch / tree-sitter / container ingest / UI) are future work.
+See [`docs/PROJECT.md`](docs/PROJECT.md), the [specs](docs/superpowers/specs/), and the
+[AWS concepts review](docs/aws-concepts-review.md).
