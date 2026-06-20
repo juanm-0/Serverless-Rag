@@ -83,6 +83,28 @@ python -m eval.run_eval                            # score the golden set
 
 `.env` is gitignored — never commit real keys.
 
+**`rag --help`** (and `rag ingest --help` / `rag query --help`) is self-documenting:
+```text
+usage: rag [-h] {ingest,query} ...
+
+RAG over a codebase - answers grounded in the code, with citations. Cloud is
+the default; use --local for the offline dev pipeline.
+
+positional arguments:
+  {ingest,query}
+    ingest        Index a repo via the deployed endpoint (or --local).
+    query         Ask a question of the deployed endpoint (or --local).
+
+examples:
+  # cloud (default) - needs INVOKE_URL + API_KEY in .env
+  rag ingest https://github.com/OWNER/REPO        index a repo in the cloud (returns 202)
+  rag query  "Where is auth handled?" -k 4        ask your deployed endpoint
+
+  # local (--local) - needs an LLM key (e.g. GROQ_API_KEY) in .env
+  rag ingest . --local                            build a local on-disk index
+  rag query  "Where is auth handled?" --local     query the local index
+```
+
 ---
 
 ## Deploy your own serverless instance on AWS (optional)

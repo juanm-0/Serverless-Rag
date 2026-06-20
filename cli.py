@@ -20,9 +20,27 @@ def _looks_like_url(source: str) -> bool:
     return source.startswith(("http://", "https://", "git@"))
 
 
+_EXAMPLES = """\
+examples:
+  # cloud (default) - needs INVOKE_URL + API_KEY in .env
+  rag ingest https://github.com/OWNER/REPO        index a repo in the cloud (returns 202)
+  rag query  "Where is auth handled?" -k 4        ask your deployed endpoint
+
+  # local (--local) - needs an LLM key (e.g. GROQ_API_KEY) in .env
+  rag ingest . --local                            build a local on-disk index
+  rag query  "Where is auth handled?" --local     query the local index
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="rag", description="RAG over a codebase — cloud by default.")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(
+        prog="rag",
+        description="RAG over a codebase - answers grounded in the code, with citations. "
+        "Cloud is the default; use --local for the offline dev pipeline.",
+        epilog=_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="command", required=True, metavar="{ingest,query}")
 
     p_ingest = sub.add_parser("ingest", help="Index a repo via the deployed endpoint (or --local).")
     p_ingest.add_argument("source", help="A git URL (default cloud), or a local path with --local.")
