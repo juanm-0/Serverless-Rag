@@ -90,7 +90,14 @@ This file is about the tool itself.
   for the local Phase 0 proof.
 - **LLM / generation (PLUGGABLE):** a chat model behind `LLMProvider`, with a prompt
   template that enforces grounding + citations.
-- **API:** **FastAPI** app, runnable locally and deployable serverless (local-dev parity).
+- **API:** **API Gateway (REST) in front of plain Lambda handler functions** — no Python
+  web framework. Each handler is `def handler(event, context)` that reads the API Gateway
+  proxy event and returns a status/body dict; routing, the API-key usage plan, and
+  throttling live in API Gateway (Terraform), not app code. (FastAPI was the original Phase 0
+  plan; the build went serverless-native instead — FastAPI is now a Phase 3 option if a
+  Fargate worker / web UI / many-route agent makes local HTTP parity worth the cold-start
+  cost.) The CLI talks to the endpoint over the stdlib `urllib` (`app/cloud.py`); `--local`
+  runs the pipeline in-process with no server.
 - **Eval harness:** Python + `pytest`, reading a golden-question YAML/JSON file.
 - **Infra/delivery:** Terraform (IaC), GitHub Actions (CI: run evals + deploy),
   CloudWatch (logs/metrics, 30-day log retention set explicitly).
@@ -162,27 +169,31 @@ The query and ingest logic depend only on these protocols, never on a concrete v
 .
 ├── PROJECT.md
 ├── README.md
-├── pyproject.toml            # or requirements.txt
+├── pyproject.toml            # deps + `rag` console script
+├── cli.py                    # `rag` CLI: cloud by default, --local for in-process
 ├── app/
-│   ├── api.py                # FastAPI app: /ingest, /query
-│   ├── ingest.py             # clone, filter, chunk
+│   ├── types.py              # Embedding/VectorStore/LLM Protocols
+│   ├── ingest.py             # resolve source (clone/path), filter, chunk
 │   ├── chunk.py              # chunking logic + metadata
 │   ├── retrieve.py           # embed query, top-k search
 │   ├── generate.py           # grounded prompt + citation parsing
+│   ├── query.py              # retrieve + generate, used by --local and the query handler
+│   ├── cloud.py              # stdlib-urllib client for the deployed endpoint
+│   ├── config.py             # SSM secret loading + env() helper
 │   └── providers/
 │       ├── embeddings.py     # EmbeddingProvider implementations
-│       ├── vectorstore.py    # VectorStore implementations (brute-force MVP)
+│       ├── vectorstore.py    # VectorStore implementations (brute-force MVP + S3/DynamoDB)
 │       └── llm.py            # LLMProvider implementations
 ├── eval/
-│   ├── golden.yaml           # question -> expected answer / expected files
+│   ├── golden.yaml           # question -> expected files / expected keywords
 │   └── run_eval.py           # scores hit-rate + correctness, writes results
 ├── infra/
 │   └── *.tf                  # Terraform for the AWS resources
 ├── handlers/
-│   ├── ingest_handler.py     # Lambda entrypoint -> app.ingest
-│   └── query_handler.py      # Lambda entrypoint -> app.retrieve + generate
+│   ├── ingest_handler.py     # Lambda entrypoint -> app.ingest (container image)
+│   └── query_handler.py      # Lambda entrypoint -> app.query (retrieve + generate)
 ├── .github/workflows/
-│   └── ci.yml                # run evals, then deploy
+│   └── deploy.yml            # run tests, then deploy via OIDC
 └── tests/
 ```
 
@@ -190,29 +201,32 @@ The query and ingest logic depend only on these protocols, never on a concrete v
 
 ## Build phases
 
-### Phase 0 — local proof (do this first)
+### Phase 0 — local proof (do this first) — DONE
 Prove the RAG core with no cloud at all.
 
-- [ ] Clone a small target repo locally.
-- [ ] Walk + filter files; chunk with path/line metadata.
-- [ ] Implement `EmbeddingProvider` (local model) and embed all chunks.
-- [ ] Implement a brute-force in-memory `VectorStore` (cosine similarity).
-- [ ] Implement `LLMProvider` and the grounded, cite-instructed prompt.
-- [ ] Ask 3-5 real questions from the CLI and get correct, cited answers.
-- [ ] Write `eval/golden.yaml` (5-10 Q/A pairs) and a first `run_eval.py`.
+- [x] Clone a small target repo locally.
+- [x] Walk + filter files; chunk with path/line metadata.
+- [x] Implement `EmbeddingProvider` (local model) and embed all chunks.
+- [x] Implement a brute-force in-memory `VectorStore` (cosine similarity).
+- [x] Implement `LLMProvider` and the grounded, cite-instructed prompt.
+- [x] Ask 3-5 real questions from the CLI and get correct, cited answers.
+- [x] Write `eval/golden.yaml` (5-10 Q/A pairs) and a first `run_eval.py`.
 
 Exit criterion: cited answers from the terminal + a first eval score.
 
-### Phase 1 — serverless MVP (the resume artifact)
+### Phase 1 — serverless MVP (the resume artifact) — DONE
 Same core, now deployed and provisioned as code.
 
-- [ ] Wrap ingest + query in the FastAPI app; run it locally end to end.
-- [ ] Move vectors/metadata to S3 + DynamoDB behind the same interfaces.
-- [ ] Write Lambda handlers that call into the app.
-- [ ] Terraform: S3, DynamoDB, two Lambdas, API Gateway, IAM roles, CloudWatch.
-- [ ] Set CloudWatch log retention to 30 days. Add a $1 AWS Budget alarm.
-- [ ] GitHub Actions: run evals on push, deploy on main.
-- [ ] README with setup, a 60-second demo, and the current eval score.
+- [x] Expose ingest + query as plain Lambda handler functions behind API Gateway
+      (no FastAPI); the `rag` CLI calls the endpoint over stdlib `urllib`, and `--local`
+      runs the same `app/` pipeline in-process for local-dev parity.
+- [x] Move vectors/metadata to S3 + DynamoDB behind the same interfaces.
+- [x] Write Lambda handlers that call into the app (query = zip; ingest = container image
+      so `git` is available to clone repos server-side).
+- [x] Terraform: S3, DynamoDB, two Lambdas, API Gateway, IAM roles, CloudWatch, ECR, OIDC.
+- [x] Set CloudWatch log retention to 30 days. Add a $1 AWS Budget alarm.
+- [x] GitHub Actions: run tests on push, deploy on main via OIDC (no stored AWS keys).
+- [x] README with setup, a 60-second demo, and the current eval score.
 
 Exit criterion: `POST /query` returns a grounded, cited answer from AWS, deploys via
 CI, and `terraform destroy` tears it all down cleanly.

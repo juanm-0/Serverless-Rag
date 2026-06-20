@@ -41,7 +41,7 @@ Embeddings (pluggable): a sentence‑transformer model run locally during ingest
 Vector store + retrieval: for the MVP, store vectors as a file and do brute‑force cosine similarity in memory. Simple, free, and it forces you to understand what a vector search actually is before you reach for a managed one.
 Metadata: a key‑value store (or just bundled alongside the vectors for the MVP).
 LLM / generation (pluggable): a chat model behind a single generate(question, context) function, with a prompt template that enforces grounding + citations.
-API: write it as a small FastAPI app so you can run it locally, then deploy the same app serverless. Local‑dev parity is a big quality‑of‑life win.
+API: as built, the HTTP surface is API Gateway (REST) in front of plain Lambda handler functions — no Python web framework. The `rag` CLI calls the endpoint over the stdlib urllib, and `--local` runs the same pipeline in‑process for local‑dev parity. (The original sketch here was a small FastAPI app for run-local-then-deploy parity; the build went serverless‑native instead, with FastAPI noted as a Phase 3 option.)
 Eval harness: a Python script (or pytest) reading a golden‑question file (YAML/JSON), running the query flow, and scoring the results.
 Runtime + delivery: serverless functions behind a gateway, provisioned with Terraform, deployed via GitHub Actions, logged to CloudWatch. (The cloud layer you already have the diagram for.)
 
