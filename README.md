@@ -59,12 +59,52 @@ use the venv path `.venv/Scripts/python.exe` as shown.)
 - **Ingest:** walk + filter files → line-based chunks (path + line range) →
   local embeddings → `index/vectors.npy` + `index/chunks.json`.
 - **Query:** embed the question → brute-force cosine top-k → grounded prompt →
-  the LLM returns `{answer, used_block_ids, refused}` → mapped to citations.
+  the LLM returns `{answer, used_blocks, refused}` (numbered-block citations) →
+  mapped to citations.
 - **Eval:** golden Q/A in `eval/golden.yaml`, scored for retrieval hit-rate and
   answer correctness.
 
 Embeddings, vector store, and LLM are each pluggable behind one Protocol
 (`app/types.py`) — swapping a vendor touches no query/ingest logic.
+
+## Phase 1 — live on AWS (serverless)
+
+The same RAG core runs serverless on AWS, provisioned with Terraform. See the
+[Phase 1 spec](docs/superpowers/specs/2026-06-19-phase1-serverless-mvp-design.md)
+and the [AWS concepts review](docs/aws-concepts-review.md).
+
+- **Embeddings:** hosted Gemini (`gemini-embedding-001`) — no torch in Lambda.
+- **Storage:** vectors in **S3**, chunk text/metadata in **DynamoDB** (top-k via
+  `BatchGetItem`), eval results in DynamoDB.
+- **Compute/API:** two zip **Lambdas** (query sync, ingest async-202) behind a
+  REST **API Gateway** with an API-key usage plan; secrets in **SSM SecureString**.
+- **Delivery:** Terraform (S3 remote state, native locking) + **GitHub Actions via
+  OIDC** (no stored AWS keys); CloudWatch logs at 30-day retention.
+
+```bash
+# deploy
+aws ssm put-parameter --name /serverless-rag/groq-api-key   --type SecureString --value "$GROQ_API_KEY"   --region ca-central-1
+aws ssm put-parameter --name /serverless-rag/gemini-api-key --type SecureString --value "$GEMINI_API_KEY" --region ca-central-1
+PYTHON=.venv/Scripts/python.exe bash scripts/build_lambda.sh
+cd infra && terraform init && terraform apply
+
+# query the deployed endpoint (key from the usage plan)
+curl -s -X POST "$(terraform -chdir=infra output -raw invoke_url)/query" \
+  -H "x-api-key: <API_KEY>" -H "content-type: application/json" \
+  -d '{"question":"How are vectors searched?"}'
+
+# tear it all down (no lingering cost)
+terraform -chdir=infra destroy
+```
+
+Live response (served from AWS): a grounded answer like *"Cosine similarity"* citing
+`providers/vectorstore.py` — `{answer, citations[], refused, latency_ms, tokens}`.
+
+> **Free-tier note:** Gemini's embedding free tier is tokens-per-minute limited, so
+> the deployed demo index covers `app/` only; a full-repo cloud index needs request
+> throttling or a paid tier. `git` isn't in the Lambda runtime, so cloud-side
+> repo-URL ingest runs from a workstation against the cloud store (or a container
+> image — a Phase 3 item).
 
 ## Current eval score
 

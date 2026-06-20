@@ -178,10 +178,12 @@ the standard "keep secrets out of IaC, read at runtime" pattern.
 
 ---
 
-## Google Gemini embeddings — hosted `text-embedding-004`
+## Google Gemini embeddings — hosted `gemini-embedding-001`
 
 **What it is (non-AWS).** A hosted API that turns text into a fixed-length vector.
-Free tier: ~1,500 req/day, no card. Reuses the `google-genai` SDK we already added.
+Free tier exists (no card) but is **tokens-per-minute limited**. Reuses the
+`google-genai` SDK we already added. (We initially specced `text-embedding-004`;
+it's retired — the current GA model is `gemini-embedding-001`.)
 
 **How we use it here.** A new `EmbeddingProvider` implementation. Called in two places:
 embedding every chunk during ingest, and embedding the question during query.
@@ -286,6 +288,35 @@ from local files to S3+DynamoDB touched zero query logic."*
    log retention set to 30 days explicitly.
 
 ---
+
+## Lessons from the live deploy (gotchas the moto tests couldn't catch)
+
+These are the real-world surprises hit while deploying — the kind of thing local
+mocks never show, and worth remembering:
+
+1. **Linux wheels for Lambda.** numpy / pydantic-core ship as compiled wheels;
+   a package built on Windows won't run on Amazon Linux. Build with
+   `pip install --platform manylinux2014_x86_64 --only-binary=:all:` (the
+   `scripts/build_lambda.sh` does this) so it works from any host. The package is
+   ~121 MB — fine under the 250 MB zip limit *because* embeddings are hosted (no torch).
+2. **DynamoDB partial success.** `BatchWriteItem`/`BatchGetItem` can return
+   `UnprocessedItems`/`UnprocessedKeys` under throttling — silently dropping data if
+   ignored. The store retries them. moto never returns these, so only a real deploy
+   (or a fake client) exercises it.
+3. **The embedding model name drifts.** `text-embedding-004` 404'd; the GA model is
+   now `gemini-embedding-001`. Verify model names against the live API, don't assume.
+4. **Provider batch limits.** Gemini caps `embed_content` at 100 inputs per request —
+   the provider chunks calls at 100. And the free tier's tokens-per-minute cap means a
+   big repo can't be embedded in one burst (throttle, or use a paid tier).
+5. **Weak models and the citation contract.** The free Groq Llama wouldn't reliably
+   echo long exact block ids, so citations came back empty. Switching to **numbered
+   blocks** (`[1] [2] …` → integer `used_blocks`) fixed it — a good lesson in designing
+   contracts for the weakest model you'll run.
+6. **No `git` in the Lambda runtime.** `git clone` isn't available; cloud-side
+   repo-URL ingest needs a container image or runs from a workstation against the
+   cloud store.
+7. **Terraform state locking modernized.** The DynamoDB lock table is deprecated;
+   Terraform ≥1.10 locks natively via S3 (`use_lockfile = true`) — one less resource.
 
 ## Glossary
 
