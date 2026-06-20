@@ -26,7 +26,8 @@ class SentenceTransformerEmbeddings:
         return np.asarray(vectors, dtype=np.float32).tolist()
 
 
-DEFAULT_GEMINI_EMBED_MODEL = "text-embedding-004"
+DEFAULT_GEMINI_EMBED_MODEL = "gemini-embedding-001"
+_GEMINI_MAX_BATCH = 100  # Gemini embed_content allows at most 100 inputs per request
 
 
 class GeminiEmbeddings:
@@ -47,5 +48,10 @@ class GeminiEmbeddings:
             self._client = genai.Client()
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        response = self._client.models.embed_content(model=self.model, contents=texts)
-        return [[float(x) for x in e.values] for e in response.embeddings]
+        vectors: list[list[float]] = []
+        # Gemini rejects batches larger than 100 inputs; chunk the calls.
+        for i in range(0, len(texts), _GEMINI_MAX_BATCH):
+            batch = texts[i : i + _GEMINI_MAX_BATCH]
+            response = self._client.models.embed_content(model=self.model, contents=batch)
+            vectors.extend([float(x) for x in e.values] for e in response.embeddings)
+        return vectors
