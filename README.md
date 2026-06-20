@@ -63,13 +63,16 @@ cp .env.example .env
 | `gemini` | yes | `GEMINI_API_KEY` | aistudio.google.com → Get API key |
 | `anthropic` | paid | `ANTHROPIC_API_KEY` | console.anthropic.com |
 
-**Use it:**
+**Use it** (one CLI; `<source>` is a local path or a git URL — URLs auto-clone):
 ```bash
-.venv/Scripts/python.exe -m cli ingest --path .                     # index a local dir
-.venv/Scripts/python.exe -m cli ingest --repo-url https://github.com/OWNER/REPO  # or a public repo
-.venv/Scripts/python.exe -m cli query "Where does chunking happen?"  # grounded, cited answer
-.venv/Scripts/python.exe -m eval.run_eval                            # score the golden set
+.venv/Scripts/python.exe -m cli ingest .                              # index a local dir
+.venv/Scripts/python.exe -m cli ingest https://github.com/OWNER/REPO  # or a public repo
+.venv/Scripts/python.exe -m cli query "Where does chunking happen?"   # grounded, cited answer
+.venv/Scripts/python.exe -m eval.run_eval                             # score the golden set
 ```
+> After `pip install`, the `rag` console script works too (e.g. `rag ingest .`). On
+> Windows, bare `python` may hit a broken Store stub — use `.venv/Scripts/python.exe`.
+
 `.env` is gitignored — never commit real keys.
 
 ---
@@ -115,19 +118,29 @@ in GitHub). Set the workflow's `role-to-assume` to *your* CI role ARN.
 
 Both ingest **and** query run **entirely in AWS**. The ingest Lambda is a container
 image (with `git` baked in), so it clones→chunks→embeds→stores server-side — no local
-clone. The query Lambda serves answers. Local CLI mode (above) stays as an explicit
-*dev* option.
+clone. The same CLI talks to your endpoint with `--cloud` (set `INVOKE_URL` + `API_KEY`
+in your `.env` first):
 
-**Index a repo into your cloud store (fully serverless):**
 ```bash
-KEY=$(aws apigateway get-api-key --api-key <your-api-key-id> --include-value --region <your-region> --query value --output text)
-curl -s -X POST "<your-invoke-url>/ingest" \
-  -H "x-api-key: $KEY" -H "content-type: application/json" \
-  -d '{"repo_url":"https://github.com/OWNER/REPO"}'      # returns 202; runs in the background
+# get your endpoint + key (your own deployment), put them in .env
+terraform -chdir=infra output -raw invoke_url    # -> INVOKE_URL
+aws apigateway get-api-key --api-key <your-api-key-id> --include-value \
+  --region <your-region> --query value --output text   # -> API_KEY
+
+# then, the easy way — same CLI, just --cloud:
+.venv/Scripts/python.exe -m cli ingest https://github.com/OWNER/REPO --cloud  # 202; runs in the cloud
+.venv/Scripts/python.exe -m cli query "How does it handle video streaming?" --cloud -k 4
 ```
-The ingest Lambda clones the repo, chunks, embeds (Gemini), and writes vectors→S3 +
-chunks→DynamoDB. Watch progress in CloudWatch logs `/aws/lambda/serverless-rag-ingest`
-(`ingest complete: N chunks`).
+`ingest --cloud` calls `POST /ingest` (the Lambda clones+chunks+embeds+stores and returns
+202); `query --cloud` calls `POST /query`. Watch ingest progress in CloudWatch logs
+`/aws/lambda/serverless-rag-ingest` (`ingest complete: N chunks`).
+
+Raw HTTP works too if you prefer `curl`:
+```bash
+KEY=$(aws apigateway get-api-key --api-key <id> --include-value --region <region> --query value --output text)
+curl -s -X POST "<invoke-url>/query" -H "x-api-key: $KEY" -H "content-type: application/json" \
+  -d '{"question":"How does it handle video streaming?","k":4}'
+```
 > **Limits:** the ingest Lambda has a hard **15-minute** max, and Gemini's free
 > embedding tier is rate/quota limited (the embedder batches ≤100 and retries on 429
 > with back-off). So this targets **small-to-moderate repos**; very large ones are
