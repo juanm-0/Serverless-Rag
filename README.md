@@ -41,17 +41,26 @@ Embeddings, the vector store, and the LLM are each **pluggable behind one interf
 
 **Requirements:** Python 3.11+ and at least one free LLM key.
 
+**1. Install (one-time):**
 ```bash
 python -m venv .venv
-# Windows PowerShell: .\.venv\Scripts\Activate.ps1   |  Bash: source .venv/Scripts/activate
 python -m pip install -e ".[dev]"
 ```
 > First run downloads `all-MiniLM-L6-v2` + `torch` (a large one-time install). Locally,
 > embeddings run on your machine; only answer-generation calls an LLM API.
->
-> On Windows, bare `python` may hit a broken Store stub — use `.venv/Scripts/python.exe`.
 
-**Provide your key(s)** — copy the template and fill in your own:
+**2. Activate the venv → unlocks the short `rag` command** (once per terminal):
+```bash
+source .venv/Scripts/activate          # Git Bash / macOS / Linux
+# PowerShell:  .\.venv\Scripts\Activate.ps1      cmd:  .venv\Scripts\activate.bat
+```
+After activating, just type `rag …` (and `python`/`pytest` resolve to the venv). **If you
+don't activate**, use one of: `.venv\Scripts\rag.exe …` (Windows) or
+`.venv/Scripts/python.exe -m cli …` (always works — and on Windows bare `python` may hit a
+broken Microsoft Store stub, so the explicit venv path avoids that).
+
+**3. Provide your key(s).** `.env.example` is the *tracked template*; **`.env` is the local
+file you create from it** (it's gitignored — never committed). Copy it and fill in yours:
 ```bash
 cp .env.example .env
 # edit .env, e.g.  GROQ_API_KEY=gsk_your_own_key
@@ -63,16 +72,14 @@ cp .env.example .env
 | `gemini` | yes | `GEMINI_API_KEY` | aistudio.google.com → Get API key |
 | `anthropic` | paid | `ANTHROPIC_API_KEY` | console.anthropic.com |
 
-**Use it** — the CLI defaults to your **cloud** endpoint; add `--local` to run offline
-(local embeddings + on-disk index). `<source>` is a local path or git URL (URLs auto-clone):
+**Use it** (with the venv activated). The CLI defaults to your **cloud** endpoint; add
+`--local` to run offline. `<source>` is a local path or git URL (URLs auto-clone):
 ```bash
-.venv/Scripts/python.exe -m cli ingest . --local                              # index a local dir
-.venv/Scripts/python.exe -m cli ingest https://github.com/OWNER/REPO --local  # or a public repo
-.venv/Scripts/python.exe -m cli query "Where does chunking happen?" --local   # grounded, cited answer
-.venv/Scripts/python.exe -m eval.run_eval                                     # score the golden set
+rag ingest . --local                              # index a local dir
+rag ingest https://github.com/OWNER/REPO --local  # or a public repo
+rag query "Where does chunking happen?" --local   # grounded, cited answer
+python -m eval.run_eval                            # score the golden set
 ```
-> After `pip install`, the `rag` console script works too (e.g. `rag ingest . --local`).
-> On Windows, bare `python` may hit a broken Store stub — use `.venv/Scripts/python.exe`.
 
 `.env` is gitignored — never commit real keys.
 
@@ -128,9 +135,9 @@ terraform -chdir=infra output -raw invoke_url    # -> INVOKE_URL
 aws apigateway get-api-key --api-key <your-api-key-id> --include-value \
   --region <your-region> --query value --output text   # -> API_KEY
 
-# then just use the CLI — cloud is the default:
-.venv/Scripts/python.exe -m cli ingest https://github.com/OWNER/REPO    # 202; runs in the cloud
-.venv/Scripts/python.exe -m cli query "How does it handle video streaming?" -k 4
+# then just use the CLI — cloud is the default (venv activated):
+rag ingest https://github.com/OWNER/REPO                 # 202; runs in the cloud
+rag query "How does it handle video streaming?" -k 4
 ```
 `ingest` calls `POST /ingest` (the Lambda clones+chunks+embeds+stores and returns 202);
 `query` calls `POST /query`. Watch ingest progress in CloudWatch logs
