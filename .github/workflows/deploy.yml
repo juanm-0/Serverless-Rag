@@ -1,0 +1,47 @@
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::585242447302:role/serverless-rag-ci-deploy
+          aws-region: ca-central-1
+      - uses: hashicorp/setup-terraform@v3
+      - name: Build Lambda package
+        run: bash scripts/build_lambda.sh
+      - name: Terraform plan (PR) / apply (main)
+        working-directory: infra
+        run: |
+          terraform init
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            terraform plan
+          else
+            terraform apply -auto-approve
+          fi
