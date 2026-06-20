@@ -51,3 +51,38 @@ def test_embed_chunks_requests_at_gemini_batch_limit():
     vecs = emb.embed([f"t{i}" for i in range(250)])
     assert len(vecs) == 250  # all vectors returned, in order
     assert client.models.batch_sizes == [100, 100, 50]  # 3 batched calls
+
+
+def test_embed_respects_configurable_batch_size():
+    client = _FakeClient()
+    emb = GeminiEmbeddings(client=client, batch_size=2)
+    vecs = emb.embed(["a", "b", "c", "d", "e"])
+    assert len(vecs) == 5
+    assert client.models.batch_sizes == [2, 2, 1]
+
+
+class _RateLimitOnceModels:
+    """Raises a 429-style error on the first call, then succeeds."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def embed_content(self, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
+        return _FakeResponse([[float(len(t)), 1.0] for t in kwargs["contents"]])
+
+
+class _RateLimitClient:
+    def __init__(self):
+        self.models = _RateLimitOnceModels()
+
+
+def test_embed_retries_on_rate_limit(monkeypatch):
+    monkeypatch.setattr("app.providers.embeddings.time.sleep", lambda *_a: None)
+    client = _RateLimitClient()
+    emb = GeminiEmbeddings(client=client)
+    vecs = emb.embed(["xx"])
+    assert vecs == [[2.0, 1.0]]
+    assert client.models.calls == 2  # first 429 was retried
