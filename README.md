@@ -207,6 +207,7 @@ the prompt, the corpus, and the scoring method.
 ## Build phases & docs
 
 Phase 0 (local proof) and Phase 1 (serverless AWS) are complete; Phase 2 (tool-calling
-agent) and Phase 3 (OpenSearch / tree-sitter / container ingest / UI) are future work.
+agent) and Phase 3 (hybrid retrieval, code-aware embeddings, LLM-as-judge eval,
+OpenSearch / tree-sitter / Fargate ingest / UI) are future work.
 See [`docs/PROJECT.md`](docs/PROJECT.md), the [specs](docs/superpowers/specs/), and the
 [AWS concepts review](docs/aws-concepts-review.md).

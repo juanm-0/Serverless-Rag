@@ -228,9 +228,30 @@ Turn retrieval into a tool the model chooses to call.
 This is the step that turns a RAG pipeline into a genuine tool-calling agent.
 
 ### Phase 3 — optional scale-ups
-- [ ] Swap brute-force for OpenSearch (hybrid vector + keyword search).
-- [ ] `tree-sitter` syntax-aware chunking.
-- [ ] Containerize the ingest worker (ECS Fargate).
+
+**Retrieval & answer quality** (motivated by the Phase 0 eval misses — pure-vector
+retrieval lets prose docs out-rank code on conceptual queries, and substring scoring
+under-counts correct answers):
+- [ ] **Hybrid retrieval** — combine dense vector similarity with sparse keyword/BM25
+      ranking so code files surface for conceptual natural-language queries (the Q5 miss).
+      OpenSearch gives both in one store; for the brute-force path, fuse cosine with a
+      lexical score (e.g. reciprocal-rank fusion).
+- [ ] **Corpus weighting** — down-weight or exclude `docs/` (and other prose) when the
+      question is about code, so code files win for code questions.
+- [ ] **Code-aware embeddings** — swap general-purpose `all-MiniLM-L6-v2` for an
+      embedding model trained on source code.
+- [ ] **Tune chunking & `k`** — sweep window/overlap and top-`k`; pairs naturally with
+      `tree-sitter` symbol-aware chunks below.
+- [ ] **LLM-as-judge eval scoring** — replace brittle substring keyword matching with a
+      cheap LLM grader (kept behind a flag alongside the deterministic scorer), so the
+      correctness metric reflects semantic correctness, not exact-token echoing (the Q4
+      false-negative).
+
+**Infrastructure & UX:**
+- [ ] Swap brute-force for OpenSearch (the hybrid vector + keyword store above).
+- [ ] `tree-sitter` syntax-aware chunking (function/class-aware blocks).
+- [ ] Containerize the ingest worker (ECS Fargate) — Phase 1 already runs ingest as a
+      container-image Lambda; Fargate is the next step for longer/larger ingests.
 - [ ] A minimal web UI.
 
 ---
