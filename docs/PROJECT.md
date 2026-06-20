@@ -259,7 +259,18 @@ under-counts correct answers):
 - [ ] **Least-privilege & expiry** — prefer short-lived/fine-grained tokens (GitHub App
       installation tokens, read-only deploy keys) scoped to just the repos being indexed.
 
-**Infrastructure & UX:**
+**Local / non-git sources** (index a project that was never version-controlled — no upstream
+to clone from):
+- [ ] **Directory upload** — let a caller ingest a plain local folder instead of a git URL.
+      The CLI packs the directory (tar/zip, honoring the same skip rules as the walker —
+      `.git`, `node_modules`, build output, binaries, size cap) and uploads it to a scratch
+      S3 prefix; the cloud ingest worker unpacks and indexes it. (Today's `--local` path
+      chunks on the caller's machine; this brings non-git folders to the *cloud* pipeline.)
+- [ ] **Source abstraction** — generalize `resolve_source` so ingest accepts `git-url`,
+      `local-path`, or `uploaded-archive` behind one interface, instead of assuming a
+      clonable URL.
+- [ ] **Provenance metadata** — record the source kind/identifier on each chunk (no commit
+      SHA exists for an uncontrolled folder), so citations and re-index still make sense.
 - [ ] Swap brute-force for OpenSearch (the hybrid vector + keyword store above).
 - [ ] `tree-sitter` syntax-aware chunking (function/class-aware blocks).
 - [ ] Containerize the ingest worker (ECS Fargate) — Phase 1 already runs ingest as a

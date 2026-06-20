@@ -208,6 +208,7 @@ the prompt, the corpus, and the scoring method.
 
 Phase 0 (local proof) and Phase 1 (serverless AWS) are complete; Phase 2 (tool-calling
 agent) and Phase 3 (hybrid retrieval, code-aware embeddings, LLM-as-judge eval,
-private-repo ingest, OpenSearch / tree-sitter / Fargate ingest / UI) are future work.
+private-repo ingest, local/non-git source ingest, OpenSearch / tree-sitter /
+Fargate ingest / UI) are future work.
 See [`docs/PROJECT.md`](docs/PROJECT.md), the [specs](docs/superpowers/specs/), and the
 [AWS concepts review](docs/aws-concepts-review.md).
