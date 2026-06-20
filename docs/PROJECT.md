@@ -247,6 +247,18 @@ under-counts correct answers):
       correctness metric reflects semantic correctness, not exact-token echoing (the Q4
       false-negative).
 
+**Private repository support** (index repos you have credentials for, not just public ones):
+- [ ] **Authenticated clone** — accept a git credential (PAT / SSH deploy key / GitHub App
+      token) so the ingest worker can `git clone` private repos. The credential never lands
+      in the repo URL on disk: store it as an SSM `SecureString`, inject it at clone time
+      (e.g. `x-access-token:<PAT>@` for HTTPS, or an in-memory `GIT_SSH_COMMAND` key), and
+      scrub it from logs.
+- [ ] **Per-caller credentials** — since this is bring-your-own-keys, let each deployer
+      supply their own git token via SSM (one parameter per source/owner), keeping one
+      user's private-repo access isolated from another's.
+- [ ] **Least-privilege & expiry** — prefer short-lived/fine-grained tokens (GitHub App
+      installation tokens, read-only deploy keys) scoped to just the repos being indexed.
+
 **Infrastructure & UX:**
 - [ ] Swap brute-force for OpenSearch (the hybrid vector + keyword store above).
 - [ ] `tree-sitter` syntax-aware chunking (function/class-aware blocks).
