@@ -8,3 +8,10 @@ eval/results/
 .env
 # sentence-transformers model cache may land here on some setups
 .cache/
+# Terraform / Lambda build artifacts
+infra/build/
+infra/build.zip
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
