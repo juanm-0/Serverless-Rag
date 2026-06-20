@@ -7,12 +7,15 @@ Persists to two files that map cleanly to S3 objects in Phase 1:
 from __future__ import annotations
 
 import json
+import time
 from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 
 from app.types import Chunk, Hit
+
+_DDB_MAX_RETRIES = 8
 
 _VECTORS_FILE = "vectors.npy"
 _CHUNKS_FILE = "chunks.json"
@@ -107,24 +110,33 @@ class S3DynamoVectorStore:
         )
         for i in range(0, len(self._chunks), _DDB_BATCH_WRITE):
             batch = self._chunks[i : i + _DDB_BATCH_WRITE]
-            self._dynamo.batch_write_item(
-                RequestItems={
-                    self._table: [
-                        {
-                            "PutRequest": {
-                                "Item": {
-                                    "id": {"S": c["id"]},
-                                    "path": {"S": c["path"]},
-                                    "start_line": {"N": str(c["start_line"])},
-                                    "end_line": {"N": str(c["end_line"])},
-                                    "text": {"S": c["text"]},
-                                }
-                            }
+            put_requests = [
+                {
+                    "PutRequest": {
+                        "Item": {
+                            "id": {"S": c["id"]},
+                            "path": {"S": c["path"]},
+                            "start_line": {"N": str(c["start_line"])},
+                            "end_line": {"N": str(c["end_line"])},
+                            "text": {"S": c["text"]},
                         }
-                        for c in batch
-                    ]
+                    }
                 }
-            )
+                for c in batch
+            ]
+            self._batch_write_with_retry({self._table: put_requests})
+
+    def _batch_write_with_retry(self, request_items: dict) -> None:
+        """BatchWriteItem retrying UnprocessedItems (partial-success under throttling)."""
+        attempt = 0
+        while request_items:
+            resp = self._dynamo.batch_write_item(RequestItems=request_items)
+            request_items = resp.get("UnprocessedItems") or {}
+            if request_items:
+                attempt += 1
+                if attempt > _DDB_MAX_RETRIES:
+                    raise RuntimeError("DynamoDB BatchWriteItem: items unprocessed after retries")
+                time.sleep(min(0.05 * (2 ** attempt), 5.0))
 
     # ---- query side ----
     @classmethod
@@ -157,10 +169,9 @@ class S3DynamoVectorStore:
         result: dict[str, Chunk] = {}
         for i in range(0, len(ids), _DDB_BATCH_GET):
             batch = ids[i : i + _DDB_BATCH_GET]
-            resp = self._dynamo.batch_get_item(
-                RequestItems={self._table: {"Keys": [{"id": {"S": cid}} for cid in batch]}}
-            )
-            for item in resp["Responses"].get(self._table, []):
+            for item in self._batch_get_with_retry(
+                {self._table: {"Keys": [{"id": {"S": cid}} for cid in batch]}}
+            ):
                 result[item["id"]["S"]] = Chunk(
                     id=item["id"]["S"],
                     path=item["path"]["S"],
@@ -169,3 +180,18 @@ class S3DynamoVectorStore:
                     text=item["text"]["S"],
                 )
         return result
+
+    def _batch_get_with_retry(self, request_items: dict) -> list[dict]:
+        """BatchGetItem retrying UnprocessedKeys; returns all items for our table."""
+        items: list[dict] = []
+        attempt = 0
+        while request_items:
+            resp = self._dynamo.batch_get_item(RequestItems=request_items)
+            items.extend(resp.get("Responses", {}).get(self._table, []))
+            request_items = resp.get("UnprocessedKeys") or {}
+            if request_items:
+                attempt += 1
+                if attempt > _DDB_MAX_RETRIES:
+                    raise RuntimeError("DynamoDB BatchGetItem: keys unprocessed after retries")
+                time.sleep(min(0.05 * (2 ** attempt), 5.0))
+        return items

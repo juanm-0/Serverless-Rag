@@ -1,7 +1,12 @@
 """Ingest Lambda (async): clone+chunk+embed a repo into S3 + DynamoDB."""
 from __future__ import annotations
 
+import logging
+
 from app.config import env, load_secrets_from_ssm
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 
 def _load_secrets() -> None:
@@ -35,5 +40,5 @@ def handler(event, context):
     store = S3DynamoVectorStore(bucket, table)
     n = build_index(root, _make_embedder(), store)
     store.persist()
-    print(f"ingest complete: {n} chunks from {repo_url} -> s3://{bucket}, dynamodb:{table}")
+    logger.info("ingest complete: %d chunks from %s -> s3://%s, dynamodb:%s", n, repo_url, bucket, table)
     return {"indexed_chunks": n}

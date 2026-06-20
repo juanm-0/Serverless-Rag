@@ -86,3 +86,10 @@ def test_query_handler_no_index_is_409(monkeypatch):
     _configure(monkeypatch)
     resp = qh.handler({"body": json.dumps({"question": "where?"})}, None)
     assert resp["statusCode"] == 409
+
+
+@mock_aws
+def test_query_handler_malformed_json_body_is_400(monkeypatch):
+    _configure(monkeypatch)
+    resp = qh.handler({"body": "{not json"}, None)
+    assert resp["statusCode"] == 400
