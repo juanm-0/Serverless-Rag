@@ -317,6 +317,12 @@ mocks never show, and worth remembering:
    cloud store.
 7. **Terraform state locking modernized.** The DynamoDB lock table is deprecated;
    Terraform ≥1.10 locks natively via S3 (`use_lockfile = true`) — one less resource.
+8. **`k` is bounded by API Gateway's 29 s timeout.** On a real repo (MoneyPrinter-
+   Turbo), a query at the default `k=8` returned **504 Gateway Timeout** — eight large
+   code chunks made a prompt big enough that Groq generation exceeded API Gateway's
+   hard 29 s synchronous limit. `k=4` answered the same question in ~1.5 s. You can't
+   raise the 29 s ceiling, so for big-file corpora tune `k` down (or use a faster model,
+   or move long generations to an async pattern).
 
 ## Glossary
 
