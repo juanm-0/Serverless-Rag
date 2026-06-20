@@ -14,4 +14,4 @@ infra/build.zip
 infra/.terraform/
 *.tfstate
 *.tfstate.*
-.terraform.lock.hcl
+# Note: infra/.terraform.lock.hcl IS committed (pins provider versions for CI).
