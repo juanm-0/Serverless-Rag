@@ -34,7 +34,14 @@ jobs:
           role-to-assume: arn:aws:iam::585242447302:role/serverless-rag-ci-deploy
           aws-region: ca-central-1
       - uses: hashicorp/setup-terraform@v3
-      - name: Build Lambda package
+      - name: Build & push ingest image
+        if: github.event_name != 'pull_request'
+        run: bash scripts/build_ingest_image.sh
+        env:
+          AWS_REGION: ca-central-1
+          AWS_ACCOUNT_ID: "585242447302"
+          IMAGE_TAG: latest
+      - name: Build Lambda package (query zip)
         run: bash scripts/build_lambda.sh
       - name: Terraform plan (PR) / apply (main)
         working-directory: infra

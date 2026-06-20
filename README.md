@@ -113,28 +113,25 @@ in GitHub). Set the workflow's `role-to-assume` to *your* CI role ARN.
 
 ## Using your deployed endpoint
 
-**Important — where each step runs.** The cloud **query** path runs entirely in the
-Lambda (your endpoint). **Ingesting an external repo runs on your workstation**, because
-the Lambda runtime has no `git` to clone a URL — so you run the *same* ingest code locally
-and it writes to the *same* cloud store (S3 + DynamoDB). Chunking happens wherever ingest
-runs (locally, for an external repo). A container-image ingest Lambda (with `git`) is a
-future enhancement.
+Both ingest **and** query run **entirely in AWS**. The ingest Lambda is a container
+image (with `git` baked in), so it clones→chunks→embeds→stores server-side — no local
+clone. The query Lambda serves answers. Local CLI mode (above) stays as an explicit
+*dev* option.
 
-**Index a repo into your cloud store (run locally):**
+**Index a repo into your cloud store (fully serverless):**
 ```bash
-git clone --depth 1 https://github.com/OWNER/REPO /tmp/target   # clone is transient
-AWS_DEFAULT_REGION=<your-region> GEMINI_EMBED_BATCH=25 \
-.venv/Scripts/python.exe -c "
-from app.config import load_secrets_from_ssm; load_secrets_from_ssm()
-from app.providers.embeddings import GeminiEmbeddings
-from app.providers.vectorstore import S3DynamoVectorStore
-from app.ingest import build_index
-s = S3DynamoVectorStore('<your-index-bucket>', '<your-chunks-table>')
-print('indexed', build_index('/tmp/target', GeminiEmbeddings(), s)); s.persist()"
+KEY=$(aws apigateway get-api-key --api-key <your-api-key-id> --include-value --region <your-region> --query value --output text)
+curl -s -X POST "<your-invoke-url>/ingest" \
+  -H "x-api-key: $KEY" -H "content-type: application/json" \
+  -d '{"repo_url":"https://github.com/OWNER/REPO"}'      # returns 202; runs in the background
 ```
-> Keep the corpus modest: Gemini's free embedding tier is **tokens-per-minute** limited.
-> The embedder batches at ≤100 and **retries on 429 with back-off**, so a large repo still
-> completes — it just takes longer (a few hundred chunks ≈ several minutes).
+The ingest Lambda clones the repo, chunks, embeds (Gemini), and writes vectors→S3 +
+chunks→DynamoDB. Watch progress in CloudWatch logs `/aws/lambda/serverless-rag-ingest`
+(`ingest complete: N chunks`).
+> **Limits:** the ingest Lambda has a hard **15-minute** max, and Gemini's free
+> embedding tier is rate/quota limited (the embedder batches ≤100 and retries on 429
+> with back-off). So this targets **small-to-moderate repos**; very large ones are
+> future work (Fargate / SQS-chunked ingestion).
 
 **Ask your endpoint a question (with YOUR api key):**
 ```bash

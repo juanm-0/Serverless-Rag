@@ -312,9 +312,16 @@ mocks never show, and worth remembering:
    echo long exact block ids, so citations came back empty. Switching to **numbered
    blocks** (`[1] [2] …` → integer `used_blocks`) fixed it — a good lesson in designing
    contracts for the weakest model you'll run.
-6. **No `git` in the Lambda runtime.** `git clone` isn't available; cloud-side
-   repo-URL ingest needs a container image or runs from a workstation against the
-   cloud store.
+6. **No `git` in the Lambda runtime — now resolved with a container image.** The
+   zip runtime has no `git`, so `POST /ingest {repo_url}` couldn't clone in the
+   cloud. Fixed by repackaging the **ingest** Lambda as a **container image** (base
+   `public.ecr.aws/lambda/python:3.12` + `git` + deps) in **ECR**; the query Lambda
+   stays a zip. Now clone→chunk→embed→store all run in the Lambda. **Zip vs image:**
+   zip ≤250 MB unzipped, fast cold start, no system binaries; image ≤10 GB, can bake
+   in `git`/system packages, slightly slower cold start. *Gotcha:* switching an
+   existing function zip→image can't be done in place — Terraform must replace it,
+   and the same-name create can 409 if the old function isn't gone first (delete it,
+   then apply).
 7. **Terraform state locking modernized.** The DynamoDB lock table is deprecated;
    Terraform ≥1.10 locks natively via S3 (`use_lockfile = true`) — one less resource.
 8. **`k` is bounded by API Gateway's 29 s timeout.** On a real repo (MoneyPrinter-
