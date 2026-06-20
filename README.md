@@ -63,15 +63,16 @@ cp .env.example .env
 | `gemini` | yes | `GEMINI_API_KEY` | aistudio.google.com → Get API key |
 | `anthropic` | paid | `ANTHROPIC_API_KEY` | console.anthropic.com |
 
-**Use it** (one CLI; `<source>` is a local path or a git URL — URLs auto-clone):
+**Use it** — the CLI defaults to your **cloud** endpoint; add `--local` to run offline
+(local embeddings + on-disk index). `<source>` is a local path or git URL (URLs auto-clone):
 ```bash
-.venv/Scripts/python.exe -m cli ingest .                              # index a local dir
-.venv/Scripts/python.exe -m cli ingest https://github.com/OWNER/REPO  # or a public repo
-.venv/Scripts/python.exe -m cli query "Where does chunking happen?"   # grounded, cited answer
-.venv/Scripts/python.exe -m eval.run_eval                             # score the golden set
+.venv/Scripts/python.exe -m cli ingest . --local                              # index a local dir
+.venv/Scripts/python.exe -m cli ingest https://github.com/OWNER/REPO --local  # or a public repo
+.venv/Scripts/python.exe -m cli query "Where does chunking happen?" --local   # grounded, cited answer
+.venv/Scripts/python.exe -m eval.run_eval                                     # score the golden set
 ```
-> After `pip install`, the `rag` console script works too (e.g. `rag ingest .`). On
-> Windows, bare `python` may hit a broken Store stub — use `.venv/Scripts/python.exe`.
+> After `pip install`, the `rag` console script works too (e.g. `rag ingest . --local`).
+> On Windows, bare `python` may hit a broken Store stub — use `.venv/Scripts/python.exe`.
 
 `.env` is gitignored — never commit real keys.
 
@@ -116,10 +117,10 @@ in GitHub). Set the workflow's `role-to-assume` to *your* CI role ARN.
 
 ## Using your deployed endpoint
 
-Both ingest **and** query run **entirely in AWS**. The ingest Lambda is a container
-image (with `git` baked in), so it clones→chunks→embeds→stores server-side — no local
-clone. The same CLI talks to your endpoint with `--cloud` (set `INVOKE_URL` + `API_KEY`
-in your `.env` first):
+Both ingest **and** query run **entirely in AWS** — and this is the CLI's **default**
+(no flag). The ingest Lambda is a container image (with `git` baked in), so it
+clones→chunks→embeds→stores server-side — no local clone. Set `INVOKE_URL` + `API_KEY`
+in your `.env` first:
 
 ```bash
 # get your endpoint + key (your own deployment), put them in .env
@@ -127,12 +128,12 @@ terraform -chdir=infra output -raw invoke_url    # -> INVOKE_URL
 aws apigateway get-api-key --api-key <your-api-key-id> --include-value \
   --region <your-region> --query value --output text   # -> API_KEY
 
-# then, the easy way — same CLI, just --cloud:
-.venv/Scripts/python.exe -m cli ingest https://github.com/OWNER/REPO --cloud  # 202; runs in the cloud
-.venv/Scripts/python.exe -m cli query "How does it handle video streaming?" --cloud -k 4
+# then just use the CLI — cloud is the default:
+.venv/Scripts/python.exe -m cli ingest https://github.com/OWNER/REPO    # 202; runs in the cloud
+.venv/Scripts/python.exe -m cli query "How does it handle video streaming?" -k 4
 ```
-`ingest --cloud` calls `POST /ingest` (the Lambda clones+chunks+embeds+stores and returns
-202); `query --cloud` calls `POST /query`. Watch ingest progress in CloudWatch logs
+`ingest` calls `POST /ingest` (the Lambda clones+chunks+embeds+stores and returns 202);
+`query` calls `POST /query`. Watch ingest progress in CloudWatch logs
 `/aws/lambda/serverless-rag-ingest` (`ingest complete: N chunks`).
 
 Raw HTTP works too if you prefer `curl`:
