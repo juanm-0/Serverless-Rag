@@ -134,12 +134,47 @@ request volume.
 - Throttle to protect downstream cost (our Lambdas call paid-quota APIs).
 - Return proper status codes (`202 Accepted` for async work, `200` for query).
 
+**Usage plans (API keys + throttling).** API Gateway can require an `x-api-key` header
+and enforce a request rate + daily quota — all config, no app code. This is **abuse
+control, not user auth**: it stops a stranger who finds the URL from draining our
+Groq/Gemini free quotas, without building logins/accounts.
+
 **Tradeoffs / decisions.**
 - **The 29-second hard timeout drove Decision 3.** API Gateway cuts off any
   synchronous response after ~29 s. Ingest (clone + embed many chunks, rate-limited)
   can exceed that, so we made **ingest asynchronous**: `POST /ingest` fires the Lambda
   and immediately returns `202 Accepted`; the Lambda then works for up to 15 min in
   the background. The fast query path stays synchronous. → *Decision 3.*
+- **Public endpoint → API key + throttling (Decision 5).** Both routes sit behind a
+  usage plan requiring `x-api-key`, with rate + daily-quota caps. Protects downstream
+  paid-quota APIs for free. Consistent with PROJECT.md's "no user accounts" — this is
+  abuse control, not authentication.
+
+---
+
+## AWS Systems Manager Parameter Store — secrets management
+
+**What it is.** A managed store for configuration and secrets, addressed by name
+(e.g. `/serverless-rag/groq-api-key`). A **SecureString** parameter is **encrypted at
+rest** with KMS (the AWS-managed key is free). **Standard parameters are free.**
+
+**How we use it here.** The `GROQ_API_KEY` and `GEMINI_API_KEY` live as SecureString
+parameters. Each Lambda reads them once at cold start (`ssm:GetParameter`) and caches
+them — the cloud equivalent of our local `.env`.
+
+**Best practices (this is the important part).**
+- **Put the secret *value* in out-of-band, via the CLI** (`aws ssm put-parameter
+  --type SecureString ...`) — **never in Terraform**. Terraform only creates/references
+  the parameter and grants the Lambda IAM permission to read it. Result: **the secret
+  never touches Git or Terraform state.**
+- Scope the Lambda's IAM policy to *just* the parameters it needs (least privilege).
+- Namespace parameters per app (`/serverless-rag/...`).
+
+**Tradeoffs / decisions.** We chose **SSM SecureString (Decision 4, option B)** over
+plain Lambda env vars (which sit in plaintext in the function config and Terraform
+state) and over **Secrets Manager** (purpose-built with rotation, but ~$0.40/secret/
+month — not free, and overkill here). SSM is free, encrypted, IAM-gated, and teaches
+the standard "keep secrets out of IaC, read at runtime" pattern.
 
 ---
 
@@ -168,6 +203,61 @@ question + retrieved chunks into a grounded, cited answer. Unchanged from Phase 
 
 ---
 
+## IAM — least-privilege permissions
+
+**What it is.** Identity and Access Management: *who* (users, roles) can do *what* on
+*which* resources. A **role** is an identity a service (like a Lambda) assumes to get
+permissions — no stored credentials.
+
+**How we use it here.** Each Lambda runs as a role granting *exactly* what it needs:
+the query Lambda can read the S3 index, `BatchGetItem` the `chunks` table, and read
+its SSM parameters — nothing else. The ingest Lambda can additionally write S3 +
+`BatchWriteItem` chunks. CI assumes a separate deploy role via OIDC.
+
+**Best practice / tradeoff.** Least privilege: start from nothing and add only the
+specific actions/resources required. More policies to write than "give it admin," but
+it's the security model every AWS role assumes — and it limits blast radius if a
+function is ever compromised.
+
+---
+
+## Terraform — infrastructure as code
+
+**What it is.** You declare your cloud resources in `.tf` files; Terraform diffs that
+against a **state file** (its record of what exists) and makes reality match. `plan`
+previews changes; `apply` makes them; `destroy` tears it all down.
+
+**How we use it here.** All of the above — S3 bucket, DynamoDB tables, two Lambdas,
+API Gateway + usage plan, IAM roles, CloudWatch log groups, SSM parameter references —
+is defined in `infra/*.tf`. `terraform destroy` guarantees nothing lingers to cost money.
+
+**Best practices / decisions.**
+- **Remote state in S3 + a DynamoDB lock table (Decision 6).** State lives in S3 so
+  both your laptop *and* CI share it; the DynamoDB lock prevents two `apply`s at once.
+  Required for CI-based deploys. One-time **bootstrap**: create the bucket + lock table
+  via CLI before Terraform uses them (the classic chicken-and-egg).
+- Set **CloudWatch log retention explicitly** (30 days) on every log group — the
+  default is *infinite*, which silently accrues cost. This is the one free-tier
+  watch-item worth remembering.
+
+---
+
+## GitHub Actions — CI/CD
+
+**What it is.** GitHub's built-in automation: workflows run on events (push, PR, merge).
+
+**How we use it here (Decision 6).**
+- **On every push/PR:** the 37 unit tests + `terraform plan` (read-only preview).
+- **On merge to `main`:** `terraform apply` (deploy).
+- **Live eval:** run manually/occasionally, not per-push (it burns API quota).
+
+**Best practice / tradeoff.** **GitHub OIDC** for AWS auth: CI assumes an IAM role via
+short-lived tokens — **no long-lived AWS keys stored in GitHub**. More setup (an IAM
+OIDC provider + a repo-scoped role) than pasting access keys into secrets, but it
+removes the single most common CI credential-leak vector.
+
+---
+
 ## The pluggable-provider pattern (why Phase 1 is easy)
 
 The query/ingest logic depends only on three **interfaces** — `EmbeddingProvider`,
@@ -187,9 +277,13 @@ from local files to S3+DynamoDB touched zero query logic."*
    DynamoDB `chunks` table; eval results in a DynamoDB `eval_results` table.
 3. **Ingest trigger → asynchronous `POST /ingest` (202 Accepted).** Dodges API
    Gateway's 29 s timeout; ingest runs up to 15 min in the background.
-4. _(pending — secrets management for the Lambda's API keys)_
-5. _(pending — API protection / abuse control)_
-6. _(pending — Terraform layout + GitHub Actions CI)_
+4. **Secrets management → SSM Parameter Store SecureString.** Keys stored encrypted,
+   set via CLI (out of Terraform), read by Lambdas at runtime via IAM. Free.
+5. **API protection → API Gateway usage plan (API key + throttling + daily quota).**
+   Abuse control for the public endpoint; not user auth. Free.
+6. **Delivery → Terraform with S3+DynamoDB remote state; GitHub Actions CI/CD via
+   OIDC.** Unit tests + `plan` on PRs, `apply` on `main`, live eval manual. CloudWatch
+   log retention set to 30 days explicitly.
 
 ---
 
