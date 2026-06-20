@@ -49,7 +49,7 @@ resource "aws_iam_role_policy" "ci_iam" {
       {
         Effect   = "Allow",
         Action   = ["iam:GetOpenIDConnectProvider", "iam:CreateOpenIDConnectProvider", "iam:TagOpenIDConnectProvider", "iam:UpdateOpenIDConnectProviderThumbprint", "iam:DeleteOpenIDConnectProvider"],
-        Resource = "*"
+        Resource = "arn:aws:iam::${var.account_id}:oidc-provider/token.actions.githubusercontent.com"
       }
     ]
   })
