@@ -19,7 +19,7 @@
 
 - question: "What is the grounding contract the LLM must return?"
   expected_files: ["app/generate.py"]
-  expected_keywords: ["used_block_ids", "refused"]
+  expected_keywords: ["used_blocks", "refused"]
 
 - question: "Which Claude model does the LLM provider default to?"
   expected_files: ["app/providers/llm.py"]

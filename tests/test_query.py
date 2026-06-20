@@ -11,7 +11,7 @@ class _FakeLLM:
     last_usage = {"input": 4, "output": 6}
 
     def generate(self, system, user):
-        return '{"answer": "A.", "used_block_ids": ["f.py:1-1"], "refused": false}'
+        return '{"answer": "A.", "used_blocks": [1], "refused": false}'
 
 
 def test_answer_query_returns_full_result_shape():

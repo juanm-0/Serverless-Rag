@@ -1,8 +1,10 @@
 """Grounded answer generation with structured-JSON citations.
 
-The model is given numbered context blocks and must answer ONLY from them,
-returning a JSON object {answer, used_block_ids, refused}. We map the returned
-block ids back to citations. Malformed JSON is treated as a refusal (fail closed).
+The model is given NUMBERED context blocks ([1], [2], ...) and must answer ONLY
+from them, returning a JSON object {answer, used_blocks, refused} where
+used_blocks is a list of the integer block numbers it relied on. Block numbers
+are far more reliable for weaker models to produce than echoing long ids. We map
+the returned numbers back to citations. Malformed JSON fails closed (refusal).
 """
 from __future__ import annotations
 
@@ -17,18 +19,19 @@ SYSTEM_PROMPT = (
     "numbered context blocks provided. Do not use outside knowledge. If the blocks "
     "do not contain enough information to answer, you must refuse.\n\n"
     "Respond with a single JSON object and nothing else, in this exact shape:\n"
-    '{"answer": "<your answer>", "used_block_ids": ["<id>", ...], "refused": <true|false>}\n'
-    'Each id in used_block_ids MUST be copied verbatim from a block header. '
-    'If you cannot answer from the blocks, set "refused" to true, set "used_block_ids" to [], '
-    f'and set "answer" to "{REFUSAL_TEXT}"'
+    '{"answer": "<your answer>", "used_blocks": [<block numbers>], "refused": <true|false>}\n'
+    'used_blocks is the list of integer block numbers (the [N] labels) your answer '
+    'relied on — e.g. [1, 3]. List every block you used. If you cannot answer from '
+    'the blocks, set "refused" to true, "used_blocks" to [], and "answer" to '
+    f'"{REFUSAL_TEXT}"'
 )
 
 
 def build_user_prompt(question: str, hits: list[Hit]) -> str:
     lines = ["Context blocks:\n"]
-    for hit in hits:
+    for number, hit in enumerate(hits, start=1):
         c = hit["chunk"]
-        lines.append(f"[{c['id']}] ({c['path']} lines {c['start_line']}-{c['end_line']})")
+        lines.append(f"[{number}] ({c['path']} lines {c['start_line']}-{c['end_line']})")
         lines.append(c["text"])
         lines.append("")  # blank separator
     lines.append(f"Question: {question}")
@@ -54,9 +57,9 @@ def generate_answer(llm: LLMProvider, question: str, hits: list[Hit]) -> dict:
         if not isinstance(answer, str):
             raise TypeError("answer must be a string")
         refused = bool(parsed.get("refused", False))
-        used_ids = parsed.get("used_block_ids", []) or []
-        if not isinstance(used_ids, list):
-            raise TypeError("used_block_ids must be a list")
+        used_blocks = parsed.get("used_blocks", []) or []
+        if not isinstance(used_blocks, list):
+            raise TypeError("used_blocks must be a list")
     except (json.JSONDecodeError, KeyError, TypeError):
         # Any structurally-invalid response fails closed to a refusal so an
         # ungrounded or malformed answer never reaches the user.
@@ -65,16 +68,17 @@ def generate_answer(llm: LLMProvider, question: str, hits: list[Hit]) -> dict:
     if refused:
         return {"answer": answer, "citations": [], "refused": True, "tokens": tokens}
 
-    by_id = {hit["chunk"]["id"]: hit["chunk"] for hit in hits}
     citations: list[Citation] = []
-    for cid in used_ids:
-        chunk = by_id.get(cid)
-        if chunk is not None:
+    seen: set[int] = set()
+    for raw_number in used_blocks:
+        try:
+            index = int(raw_number) - 1  # block labels are 1-indexed
+        except (TypeError, ValueError):
+            continue  # ignore non-numeric junk rather than crashing
+        if 0 <= index < len(hits) and index not in seen:
+            seen.add(index)
+            c = hits[index]["chunk"]
             citations.append(
-                Citation(
-                    path=chunk["path"],
-                    start_line=chunk["start_line"],
-                    end_line=chunk["end_line"],
-                )
+                Citation(path=c["path"], start_line=c["start_line"], end_line=c["end_line"])
             )
     return {"answer": answer, "citations": citations, "refused": False, "tokens": tokens}
