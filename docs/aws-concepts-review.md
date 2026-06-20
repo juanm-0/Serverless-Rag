@@ -260,6 +260,48 @@ removes the single most common CI credential-leak vector.
 
 ---
 
+## Docker & Amazon ECR — the container-image ingest Lambda
+
+**Why Docker is in play.** A Lambda zip can't include system binaries, and the
+runtime has **no `git`** — so `POST /ingest {repo_url}` couldn't clone a repo in the
+cloud. The fix is to package the **ingest** Lambda as a **container image** instead of a
+zip: a Docker image lets us bake `git` (and anything else) into the runtime.
+
+**What Docker is.** A tool to build **images** — self-contained filesystem + runtime
+snapshots defined by a `Dockerfile` — and run them as **containers**. We use it only to
+*build* the ingest image; AWS runs it.
+
+**What Amazon ECR is.** Elastic Container Registry — a private Docker image registry in
+AWS (like a private Docker Hub). Lambda pulls the ingest image from here. Free tier: 500
+MB/month of storage.
+
+**How we use it here.**
+- `infra/ingest.Dockerfile` — `FROM public.ecr.aws/lambda/python:3.12` (the AWS Lambda
+  base image, which already speaks the Lambda Runtime API) → `microdnf install git` →
+  `pip install` our deps → `COPY` `app/` + `handlers/` → `CMD ["handlers.ingest_handler.handler"]`.
+- `infra/ecr.tf` — the ECR repository (`force_delete = true` so `terraform destroy` can
+  remove it even with images inside).
+- `scripts/build_ingest_image.sh` — `docker login` to ECR → `docker build` → `docker push`
+  → (if the function is already an image) `aws lambda update-function-code` to roll it.
+- The **ingest** Lambda uses `package_type = "Image"` + `image_uri`; the **query** Lambda
+  stays a **zip** (it's small and needs no system binaries).
+
+**Standard build flow (we use both):** **local Docker** for the bootstrap + dev/test
+(build, run, push the first image), and **CI builds + pushes on every deploy** (the
+GitHub Actions runner has Docker built in) — the reproducible, no-dev-laptop-needed path.
+
+**Best practices / tradeoffs.**
+- Zip vs image: **zip** ≤250 MB unzipped, faster cold start, no system binaries; **image**
+  ≤10 GB, can include `git`/system packages, slightly slower cold start + an ECR pull.
+  Use a zip unless you need a system binary or >250 MB — we mix both for exactly that reason.
+- **Same-account pull is automatic** — no ECR repository policy needed for Lambda to pull
+  an image in the same account.
+- **Gotcha (we hit it):** you can't change an existing function **zip → image in place** —
+  Terraform must *replace* it, and the same-name `CreateFunction` can `409` if the old
+  function isn't fully deleted first. Delete the old function, then apply.
+- The 15-minute Lambda max still applies — large-repo ingests are bounded by it (and by
+  Gemini's free embedding quota).
+
 ## The pluggable-provider pattern (why Phase 1 is easy)
 
 The query/ingest logic depends only on three **interfaces** — `EmbeddingProvider`,
@@ -286,6 +328,10 @@ from local files to S3+DynamoDB touched zero query logic."*
 6. **Delivery → Terraform with S3+DynamoDB remote state; GitHub Actions CI/CD via
    OIDC.** Unit tests + `plan` on PRs, `apply` on `main`, live eval manual. CloudWatch
    log retention set to 30 days explicitly.
+7. **Ingest Lambda → container image (Docker + ECR).** Repackage the ingest Lambda as a
+   container image with `git` baked in so `POST /ingest {repo_url}` clones+chunks+embeds
+   +stores entirely in the cloud (closes the no-`git` gap). Query Lambda stays a zip.
+   Local Docker for bootstrap/dev; CI builds + pushes the image on deploy.
 
 ---
 
